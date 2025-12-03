@@ -2,14 +2,15 @@
 <html>
 <head>
     <title>Display Photo and Information</title> 
-	<link rel="stylesheet"  href='css/mystyle.css'>
+    <link rel="stylesheet" href="css/mystyle.css">
 </head>
 
 <body>
 
     <h2>Select a Name to Display Photo & Info</h2>   
-    <!-- Dropdown -->
-    <select id="nameSelect" onchange="showDetails()" style='height:40px; width:320px;'>
+
+    <!-- Dropdown and OK Button -->
+    <select id="nameSelect" onchange="showDetails()" style="height:40px; width:320px;">
         <option value="">-- Select Name --</option>
 
         <!-- Earlier personalities -->
@@ -34,6 +35,8 @@
         <option value="madhu">Madhu (JFS Trainer, CDC, IARE Hyderabad)</option>
     </select>
 
+    <button id="confirmBtn" style="height:40px; margin-left:10px;">OK</button>
+
     <div class="container">
 
         <!-- LEFT BOX: PHOTO -->
@@ -49,7 +52,20 @@
 
     </div>
 
-   <script src="js/myjs.js"> </script>
+    <script src="js/myjs.js"></script>
+
+    <script>
+        //  clicking OK button
+        document.getElementById('confirmBtn').addEventListener('click', function() {
+            const confirmed = confirm("Are you sure to confirm?");
+            if (confirmed) {
+                alert("Confirmed!");
+                
+            } else {
+                alert("Cancelled!");
+            }
+        });
+    </script>
 
 </body>
 </html>
