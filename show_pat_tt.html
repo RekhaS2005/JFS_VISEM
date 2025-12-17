@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Faculty Timetable — Batch View</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 18px; }
+        .controls { margin-bottom: 14px; }
+        input[type="text"] { padding: 6px; width: 320px; margin-right: 8px; }
+        button { padding: 6px 10px; margin-right:6px; }
+        .batch-title { font-weight: bold; font-size: 18px; margin-top: 20px; margin-bottom: 6px; }
+        table { width: 90%; border-collapse: collapse; margin-bottom: 18px; }
+        th, td { border: 1px solid #000; padding: 8px; text-align: center; vertical-align: middle; }
+        th { background: lightblue; }
+        .note { color: #444; margin-top: 6px; }
+        .no-results { color: #a00; margin-top: 12px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<h2>Faculty Timetable — Batch View</h2>
+
+<div class="controls">
+    <label for="csvFile">CSV (fallback): </label>
+    <input type="file" id="csvFile" accept=".csv" />
+    <br><br>
+    <label for="facultyInput">Faculty name: </label>
+    <input type="text" id="facultyInput" placeholder="Enter faculty name (e.g., XYZ)" />
+    <button id="showBtn">Show Schedule</button>
+    <div class="note">Auto-loads <code>VI SEM HAPPENING OF THE DAY-INFO.csv</code> when served over HTTP. Otherwise upload CSV. Matching is case-insensitive and supports partial matches.</div>
+</div>
+
+<div id="tables"></div>
+
+<script>
+let parsedRows = [];
+
+function tryAutoLoadCSV() {
+    const filename = 'VI SEM HAPPENING OF THE DAY-INFO.csv';
+    fetch(encodeURI(filename))
+        .then(resp => {
+            if (!resp.ok) throw new Error('Fetch failed');
+            return resp.text();
+        })
+        .then(text => {
+            Papa.parse(text, { header: true, skipEmptyLines: true, complete: (res) => {
+                parsedRows = normalizeRows(res.data);
+                document.getElementById('tables').innerHTML = '<div style="color:green">CSV auto-loaded. Enter faculty name and click "Show Schedule".</div>';
+            }});
+        })
+        .catch(() => {
+            // ignore: user can upload manually via file input
+        });
+}
+
+function normalizeRows(rows) {
+    return rows.map(r => {
+        return {
+            SNO: (r.SNO || r['SNO'] || '').trim(),
+            BATCH: (r.BATCH || r['BATCH'] || '').trim(),
+            DAY: (r.DAY || r['DAY'] || '').trim(),
+            SESSION: (r.SESSION || r['SESSION'] || '').trim(),
+            BRANCHES: (r.BRANCHES || r['BRANCHES'] || '').trim(),
+            TOTAL: (r.TOTAL || r['TOTAL'] || '').trim(),
+            ROOM: (r.ROOM || r['ROOM'] || '').trim(),
+            COURSE: (r.COURSE || r['COURSE'] || '').trim(),
+            FACULTY: (r.FACULTY || r['FACULTY'] || '').trim()
+        };
+    });
+}
+
+document.getElementById('csvFile').addEventListener('change', function () {
+    const file = this.files[0];
+    if (!file) return;
+    Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: function (result) {
+            parsedRows = normalizeRows(result.data);
+            document.getElementById('tables').innerHTML = '<div style="color:green">CSV loaded. Enter a faculty name and click "Show Schedule".</div>';
+        },
+        error: function (err) {
+            document.getElementById('tables').innerHTML = '<div style="color:red">Error parsing CSV: ' + escapeHtml(String(err)) + '</div>';
+        }
+    });
+});
+
+document.getElementById('showBtn').addEventListener('click', showForFaculty);
+document.getElementById('facultyInput').addEventListener('keypress', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); showForFaculty(); }
+});
+document.getElementById('printAllBtn').addEventListener('click', printAllShown);
+
+function showForFaculty() {
+    const name = document.getElementById('facultyInput').value.trim();
+    const container = document.getElementById('tables');
+    container.innerHTML = '';
+
+    if (!parsedRows.length) {
+        container.innerHTML = '<div class="no-results">Please upload the CSV or serve the folder over HTTP so the CSV can be auto-loaded.</div>';
+        return;
+    }
+    if (!name) {
+        container.innerHTML = '<div class="no-results">Please enter a faculty name to search.</div>';
+        return;
+    }
+
+    const q = name.toLowerCase();
+    const days = ["MON", "TUE", "WED", "THU", "FRI", "SAT"];
+    const byBatch = {};
+
+    parsedRows.forEach(r => {
+        if (!r.BATCH || !r.DAY || !r.SESSION) return;
+        if (!byBatch[r.BATCH]) byBatch[r.BATCH] = {};
+        if (!byBatch[r.BATCH][r.DAY]) byBatch[r.BATCH][r.DAY] = { FN: '', AN: '' };
+        if ((r.FACULTY || '').toLowerCase().includes(q)) {
+            byBatch[r.BATCH][r.DAY][r.SESSION] = `${escapeHtml(r.COURSE)}<br>Room: ${escapeHtml(r.ROOM)}<br>Faculty: ${escapeHtml(r.FACULTY)}`;
+        }
+    });
+
+    const visibleBatches = Object.keys(byBatch).filter(batch => {
+        return days.some(day => (byBatch[batch][day] && (byBatch[batch][day].FN || byBatch[batch][day].AN)));
+    });
+
+    if (!visibleBatches.length) {
+        container.innerHTML = '<div class="no-results">No schedule found for "' + escapeHtml(name) + '".</div>';
+        return;
+    }
+
+    visibleBatches.forEach(batch => {
+        const wrapper = document.createElement('div');
+        wrapper.style.marginBottom = '28px';
+
+        const title = document.createElement('div');
+        title.className = 'batch-title';
+        title.innerHTML = `Batch: ${escapeHtml(batch)}`;
+
+        const btn = document.createElement('button');
+        btn.innerHTML = 'Print This Timetable';
+        btn.style.marginBottom = '8px';
+        const tableId = 'table_' + batch.replace(/[^a-zA-Z0-9\-_]/g, '_');
+        btn.onclick = function () { printTable(tableId, batch); };
+
+        const table = document.createElement('table');
+        table.id = tableId;
+        let html = '<tr><th>DAY</th><th>FN</th><th rowspan=7>L<br>U<br>N<br>C<br>H</th><th>AN</th></tr>';
+        days.forEach(day => {
+            const fn = byBatch[batch][day]?.FN || '';
+            const an = byBatch[batch][day]?.AN || '';
+            html += `<tr><td>${day}</td><td>${fn}</td><td>${an}</td></tr>`;
+        });
+        table.innerHTML = html;
+
+        wrapper.appendChild(title);
+        wrapper.appendChild(btn);
+        wrapper.appendChild(table);
+        container.appendChild(wrapper);
+    });
+}
+
+function printTable(tableId, batch) {
+    const table = document.getElementById(tableId);
+    if (!table) return;
+    const title = `<h2>Batch: ${escapeHtml(batch)}</h2>`;
+    const css = '<style>table{width:100%;border-collapse:collapse}th,td{border:1px solid #000;padding:8px;text-align:center;}th{background:lightblue}</style>';
+    const w = window.open('', '', 'width=900,height=600');
+    w.document.write('<html><head><title>Print</title>' + css + '</head><body>' + title + table.outerHTML + '</body></html>');
+    w.document.close();
+    w.print();
+}
+
+function printAllShown() {
+    const container = document.getElementById('tables');
+    if (!container.innerHTML.trim()) {
+        alert('No timetables to print. Run a faculty search first.');
+        return;
+    }
+    const css = '<style>table{width:100%;border-collapse:collapse;margin-bottom:12px}th,td{border:1px solid #000;padding:8px;text-align:center;}th{background:lightblue}</style>';
+    const w = window.open('', '', 'width=1000,height=800');
+    w.document.write('<html><head><title>Print All Timetables</title>' + css + '</head><body>');
+    w.document.write(container.innerHTML);
+    w.document.write('</body></html>');
+    w.document.close();
+    w.print();
+}
+
+function escapeHtml(str) {
+    if (!str && str !== 0) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+tryAutoLoadCSV();
+</script>
+
+</body>
+</html>
